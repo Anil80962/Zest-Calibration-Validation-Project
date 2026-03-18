@@ -148,6 +148,8 @@ def export_gsheets(session):
         serial = session.get("serial_number", "UNKNOWN")
         ts = session.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         ek = session.get("existing_k", 1.0)
+        mtype = session.get("meter_type", "")
+        msize = session.get("meter_size", "")
         readings = session.get("readings", [])
 
         # ---- MASTER SHEET (Sheet1) ----
@@ -161,9 +163,9 @@ def export_gsheets(session):
         except: pass
 
         if not first:
-            mws.update("A1:N1", [["S.No","Date","Serial","Old K","Ref Vol","Cal Vol","Error %",
-                                   "Ref Flow","Cal Flow","Flow Dev %","New K","Err Status","Flow Status","Overall"]])
-            mws.format("A1:N1", {
+            mws.update("A1:P1", [["S.No","Date","Serial","Meter Type","Meter Size","Old K","Ref Vol","Test Vol","Error %",
+                                   "Ref Flow","Test Flow","Flow Dev %","New K","Err Status","Flow Status","Overall"]])
+            mws.format("A1:P1", {
                 "backgroundColor": {"red":0.08,"green":0.4,"blue":0.75},
                 "textFormat": {"bold":True,"foregroundColor":{"red":1,"green":1,"blue":1}},
                 "horizontalAlignment": "CENTER"
@@ -176,7 +178,8 @@ def export_gsheets(session):
         rows = []
         for rd in readings:
             r = rd.get("results", {})
-            rows.append([sno, ts, serial, ek, r.get("ref_volume",0), r.get("cal_volume",0),
+            rows.append([sno, ts, serial, mtype, f"{msize} mm" if msize else "", ek,
+                         r.get("ref_volume",0), r.get("cal_volume",0),
                          round(r.get("error_pct",0),4), r.get("ref_flow",0), r.get("cal_flow",0),
                          round(r.get("flow_dev_pct",0),4), round(r.get("new_k",0),6),
                          "PASS" if r.get("error_pass") else "FAIL",
@@ -187,7 +190,7 @@ def export_gsheets(session):
             mws.update(f"A{nr}", rows)
             for i, row in enumerate(rows):
                 rn = nr + i
-                for ci in [12,13,14]:
+                for ci in [14,15,16]:
                     cl = chr(64+ci)
                     v = row[ci-1]
                     bg = {"red":0.78,"green":0.9,"blue":0.79} if v=="PASS" else {"red":1,"green":0.8,"blue":0.82}
@@ -236,15 +239,21 @@ def export_gsheets(session):
             "range":{"sheetId":ws.id,"dimension":"ROWS","startIndex":6,"endIndex":7},
             "properties":{"pixelSize":6},"fields":"pixelSize"}}]})
 
-        # Device Info (rows 8-10)
-        ws.update("A8:B10", [["Serial Number:", serial], ["Date:", ts], ["Existing K-Factor:", ek]])
-        ws.format("A8:A10", {"textFormat":{"bold":True,"fontSize":11,"foregroundColor":{"red":0.3,"green":0.3,"blue":0.3}}})
-        ws.format("B8:B10", {"textFormat":{"bold":True,"fontSize":11}})
+        # Device Info (rows 8-12)
+        ws.update("A8:B12", [
+            ["Serial Number:", serial],
+            ["Date:", ts],
+            ["Meter Type:", mtype],
+            ["Meter Size:", f"{msize} mm" if msize else ""],
+            ["Existing K-Factor:", ek],
+        ])
+        ws.format("A8:A12", {"textFormat":{"bold":True,"fontSize":11,"foregroundColor":{"red":0.3,"green":0.3,"blue":0.3}}})
+        ws.format("B8:B12", {"textFormat":{"bold":True,"fontSize":11}})
 
         # Readings Table
-        hdr_row = 12
-        ws.update(f"A{hdr_row}:I{hdr_row}", [["#","Ref Volume (L)","Cal Volume (L)","Error %",
-                   "Ref Flow (LPM)","Cal Flow (LPM)","Flow Dev %","New K-Factor","Status"]])
+        hdr_row = 14
+        ws.update(f"A{hdr_row}:I{hdr_row}", [["#","Ref Volume (L)","Test Volume (L)","Error %",
+                   "Ref Flow (LPM)","Test Flow (LPM)","Flow Dev %","New K-Factor","Status"]])
         ws.format(f"A{hdr_row}:I{hdr_row}", {
             "backgroundColor":{"red":0.08,"green":0.4,"blue":0.75},
             "textFormat":{"bold":True,"foregroundColor":{"red":1,"green":1,"blue":1}},
@@ -362,10 +371,12 @@ def generate_excel(session):
     ws.merge_cells("A1:I1")
     ws["A1"].value = f"FLUXGEN - Calibration Report - {serial}"
     ws["A1"].font = Font(size=16, bold=True, color="1a237e"); ws["A1"].alignment = ctr
-    ws["A2"].value = f"Date: {session.get('timestamp','')} | K-Factor: {session.get('existing_k','')}"
+    mt = session.get("meter_type", "")
+    ms = session.get("meter_size", "")
+    ws["A2"].value = f"Date: {session.get('timestamp','')} | K-Factor: {session.get('existing_k','')} | Type: {mt} | Size: {ms} mm"
 
     r = 4
-    headers = ["#","Ref Vol (L)","Cal Vol (L)","Error %","Ref Flow","Cal Flow","Flow Dev %","New K","Status"]
+    headers = ["#","Ref Vol (L)","Test Vol (L)","Error %","Ref Flow","Test Flow","Flow Dev %","New K","Status"]
     for c, h in enumerate(headers, 1):
         cell = ws.cell(r, c, h); cell.font = hf; cell.fill = hfill; cell.alignment = ctr; cell.border = bdr
 
@@ -387,13 +398,13 @@ def generate_excel(session):
 def create_master_file():
     """Create an empty master Excel with headers."""
     wb = Workbook(); ws = wb.active; ws.title = "Records"
-    headers = ["S.No","Date","Serial","Old K","Ref Vol","Cal Vol","Error %",
-               "Ref Flow","Cal Flow","Flow Dev %","New K","Err","Flow","Overall"]
+    headers = ["S.No","Date","Serial","Type","Size","Old K","Ref Vol","Test Vol","Error %",
+               "Ref Flow","Test Flow","Flow Dev %","New K","Err","Flow","Overall"]
     hf = Font(bold=True, color="FFFFFF", size=11)
     hfill = PatternFill(start_color="1565c0", end_color="1565c0", fill_type="solid")
     ctr = Alignment(horizontal="center", vertical="center")
     bdr = Border(left=Side("thin"), right=Side("thin"), top=Side("thin"), bottom=Side("thin"))
-    widths = [6,20,16,10,12,12,10,12,12,10,12,8,8,10]
+    widths = [6,20,16,8,10,10,12,12,10,12,12,10,12,8,8,10]
     for c, (h, w) in enumerate(zip(headers, widths), 1):
         cell = ws.cell(1, c, h)
         cell.font = hf; cell.fill = hfill; cell.alignment = ctr; cell.border = bdr
@@ -409,15 +420,18 @@ def append_master(session):
             wb = load_workbook(MASTER_EXCEL); ws = wb.active; nr = ws.max_row + 1; sno = nr - 1
         else:
             wb = Workbook(); ws = wb.active; ws.title = "Records"
-            for c, h in enumerate(["S.No","Date","Serial","Old K","Ref Vol","Cal Vol","Error %",
+            for c, h in enumerate(["S.No","Date","Serial","Type","Size","Old K","Ref Vol","Cal Vol","Error %",
                                     "Ref Flow","Cal Flow","Flow Dev %","New K","Err","Flow","Overall"], 1):
                 ws.cell(1, c, h).font = Font(bold=True)
             nr = 2; sno = 1
 
+        mt = session.get("meter_type", "")
+        ms = session.get("meter_size", "")
         for rd in session.get("readings", []):
             r = rd.get("results", {})
             for c, v in enumerate([sno, session.get("timestamp",""), session.get("serial_number",""),
-                                    session.get("existing_k",""), r.get("ref_volume",0), r.get("cal_volume",0),
+                                    mt, f"{ms} mm" if ms else "", session.get("existing_k",""),
+                                    r.get("ref_volume",0), r.get("cal_volume",0),
                                     round(r.get("error_pct",0),4), r.get("ref_flow",0), r.get("cal_flow",0),
                                     round(r.get("flow_dev_pct",0),4), round(r.get("new_k",0),6),
                                     "PASS" if r.get("error_pass") else "FAIL",
@@ -502,6 +516,8 @@ td{padding:9px;text-align:center;border:1px solid var(--bd)}
 <div class="fg">
 <div><label>Serial Number</label><input id="sn" placeholder="e.g. FG24869L"></div>
 <div><label>Existing K-Factor</label><input id="ek" type="number" step="any" value="1.0"></div>
+<div><label>Meter Type</label><select id="mt"><option value="EMF">EMF - Electromagnetic Flow Meter</option><option value="USM">USM - Ultrasonic Flow Meter</option></select></div>
+<div><label>Meter Size (mm)</label><input id="ms" type="text" placeholder="e.g. 25, 50, 100"></div>
 </div>
 <div class="br"><button class="btn bp" style="font-size:15px;padding:13px 30px" onclick="startCal()"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Start Calibration</button></div>
 </div>
@@ -511,7 +527,7 @@ td{padding:9px;text-align:center;border:1px solid var(--bd)}
 <div class="ch"><svg viewBox="0 0 24 24"><path d="M21 6h-2v9H6v2c0 .55.45 1 1 1h11l4 4V7c0-.55-.45-1-1-1z"/></svg>Modbus Live Readings<span style="margin-left:auto;font-size:10px;text-transform:none;letter-spacing:0">Port: <b id="mbPort">--</b> | <span id="mbSt" style="color:#f57f17">Stopped</span></span></div>
 <div class="mbx">
 <div style="background:#f8fffe"><div class="tl">Reference Meter (ID: <span id="rsi">2</span>)</div><div class="tv" style="color:var(--s)" id="lrt">0.0000</div><div style="font-size:10px;color:var(--mt)">Totalizer (L)</div><span class="ts" id="rSt" style="background:#e8f5e9;color:#2e7d32">WAIT</span></div>
-<div style="background:#fff8f0"><div class="tl">Calibration Meter (ID: <span id="csi">1</span>)</div><div class="tv" style="color:var(--p)" id="lct">0.0000</div><div style="font-size:10px;color:var(--mt)">Totalizer (L)</div><span class="ts" id="cSt" style="background:#fff3e0;color:#e65100">WAIT</span></div>
+<div style="background:#fff8f0"><div class="tl">Test Meter (ID: <span id="csi">1</span>)</div><div class="tv" style="color:var(--p)" id="lct">0.0000</div><div style="font-size:10px;color:var(--mt)">Totalizer (L)</div><span class="ts" id="cSt" style="background:#fff3e0;color:#e65100">WAIT</span></div>
 </div>
 <div style="font-size:10px;color:var(--mt);text-align:center;margin-bottom:8px">Last: <span id="lrt2">--</span></div>
 <div class="br" style="margin-top:0"><button class="btn bp" id="lBtn" onclick="togLive()"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Start Live</button><button class="btn bo" onclick="oneRead()">Read Once</button></div>
@@ -519,14 +535,14 @@ td{padding:9px;text-align:center;border:1px solid var(--bd)}
 
 <!-- STEP 2 -->
 <div class="card hidden" id="s2">
-<div class="ch"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/></svg>Step 2 - Readings<span style="margin-left:auto;font-size:11px;text-transform:none;letter-spacing:0">S/N: <b id="dSn">-</b> | K: <b id="dK">-</b></span></div>
+<div class="ch"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/></svg>Step 2 - Readings<span style="margin-left:auto;font-size:11px;text-transform:none;letter-spacing:0">S/N: <b id="dSn">-</b> | K: <b id="dK">-</b> | <b id="dMt">-</b> <b id="dMs">-</b></span></div>
 <div class="cap"><span>Auto-fill from Modbus</span><button class="btn bp" style="padding:7px 14px;font-size:11px;margin:0;width:auto" onclick="capMb()">Capture</button></div>
 <div style="font-size:12px;font-weight:600;color:var(--mt);margin-bottom:8px">Reading #<span id="rn">1</span></div>
 <div class="fg">
 <div><label>Ref Volume (L)</label><input id="rv" type="number" step="any" placeholder="0.00"></div>
-<div><label>Cal Volume (L)</label><input id="cv" type="number" step="any" placeholder="0.00"></div>
+<div><label>Test Volume (L)</label><input id="cv" type="number" step="any" placeholder="0.00"></div>
 <div><label>Ref Flow (LPM)</label><input id="rf" type="number" step="any" placeholder="0.00"></div>
-<div><label>Cal Flow (LPM)</label><input id="cf" type="number" step="any" placeholder="0.00"></div>
+<div><label>Test Flow (LPM)</label><input id="cf" type="number" step="any" placeholder="0.00"></div>
 </div>
 <div class="br">
 <button class="btn bp" onclick="calc()"><svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>Calculate</button>
@@ -564,21 +580,24 @@ function rc(l,v,u,p){var c='rc '+(p===true?'pass':p===false?'fail':'n');return'<
 function startCal(){
   var s=document.getElementById('sn').value.trim(),k=document.getElementById('ek').value;
   if(!s){toast('Enter Serial Number','#c62828');return}
-  cur={serial_number:s,existing_k:parseFloat(k)};rds=[];sRef=null;sCal=null;
+  var mt=document.getElementById('mt').value;
+  var ms=document.getElementById('ms').value.trim();
+  cur={serial_number:s,existing_k:parseFloat(k),meter_type:mt,meter_size:ms};rds=[];sRef=null;sCal=null;
   document.getElementById('dSn').textContent=s;document.getElementById('dK').textContent=k;
+  document.getElementById('dMt').textContent=mt;document.getElementById('dMs').textContent=ms?ms+'mm':'';
   document.getElementById('rn').textContent='1';
   ['s2','s3','mbPanel'].forEach(function(id){document.getElementById(id).classList.remove('hidden')});
   clr();chkMb();document.getElementById('mbPanel').scrollIntoView({behavior:'smooth'});
   toast('Calibration started for '+s)
 }
 function clr(){['rv','cv','rf','cf'].forEach(function(id){document.getElementById(id).value=''})}
-function getSess(){return{serial_number:cur.serial_number,existing_k:cur.existing_k,readings:rds,timestamp:new Date().toLocaleString()}}
+function getSess(){return{serial_number:cur.serial_number,existing_k:cur.existing_k,meter_type:cur.meter_type,meter_size:cur.meter_size,readings:rds,timestamp:new Date().toLocaleString()}}
 
 function calc(){
   var d={ref_volume:parseFloat(document.getElementById('rv').value)||0,cal_volume:parseFloat(document.getElementById('cv').value)||0,
          ref_flow:parseFloat(document.getElementById('rf').value)||0,cal_flow:parseFloat(document.getElementById('cf').value)||0,existing_k:cur.existing_k};
   if(!d.ref_volume){toast('Enter Ref Volume','#c62828');return}
-  if(!d.cal_volume){toast('Enter Cal Volume','#c62828');return}
+  if(!d.cal_volume){toast('Enter Test Volume','#c62828');return}
   fetch('/api/calc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
   .then(function(r){return r.json()}).then(function(x){
     if(x.success){rds.push({inputs:d,results:x.results});showRes(x.results);toast('Done: '+x.results.status,x.results.overall_pass?'#2e7d32':'#c62828')}
@@ -603,10 +622,10 @@ function showRes(lr){
     rc('Flow Dev',lr.flow_dev_pct.toFixed(4)+'%','Tol: +/-2%',lr.flow_pass)+
     rc('New K',lr.new_k.toFixed(6),'Old: '+lr.existing_k,null)+
     rc('Ref Vol',lr.ref_volume+' L','Reference',null)+
-    rc('Cal Vol',lr.cal_volume+' L','Calibration',null)+
+    rc('Test Vol',lr.cal_volume+' L','Test Meter',null)+
     rc('Readings',rds.length,'Total',null);
   if(rds.length>0){
-    var t='<table><thead><tr><th>#</th><th>Ref Vol</th><th>Cal Vol</th><th>Error%</th><th>Ref Flow</th><th>Cal Flow</th><th>Flow Dev%</th><th>New K</th><th>Status</th></tr></thead><tbody>';
+    var t='<table><thead><tr><th>#</th><th>Ref Vol</th><th>Test Vol</th><th>Error%</th><th>Ref Flow</th><th>Test Flow</th><th>Flow Dev%</th><th>New K</th><th>Status</th></tr></thead><tbody>';
     rds.forEach(function(r,i){var s=r.results;t+='<tr><td>'+(i+1)+'</td><td>'+s.ref_volume+'</td><td>'+s.cal_volume+'</td><td>'+s.error_pct.toFixed(4)+'</td><td>'+s.ref_flow+'</td><td>'+s.cal_flow+'</td><td>'+s.flow_dev_pct.toFixed(4)+'</td><td>'+s.new_k.toFixed(6)+'</td><td class="'+(s.overall_pass?'tp':'tf')+'">'+s.status+'</td></tr>'});
     t+='</tbody></table>';document.getElementById('rtWrap').innerHTML=t}
   document.getElementById('s3').scrollIntoView({behavior:'smooth'})
@@ -628,7 +647,7 @@ function newCal(){if(cur&&rds.length){fetch('/api/save',{method:'POST',headers:{
 function dlMaster(){fetch('/api/master').then(function(r){if(r.ok)return r.blob().then(function(b){var u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download='Calibration_Master.xlsx';a.click();URL.revokeObjectURL(u);toast('Master report downloaded!','#2e7d32')});else toast('No data in master report yet. Export a calibration first.','#f57f17')}).catch(function(){toast('Download failed','#c62828')})}
 function loadH(){fetch('/api/history').then(function(r){return r.json()}).then(function(d){var el=document.getElementById('hList');if(!d.s||!d.s.length){el.innerHTML='<div style="text-align:center;color:var(--mt);padding:14px;font-size:12px">No records</div>';return}
   var h='';d.s.slice().reverse().forEach(function(s){var lr=s.readings&&s.readings.length?s.readings[s.readings.length-1]:null;var st=lr?lr.results.status:'N/A';var p=st==='PASS';
-  h+='<div class="hi"><div><div class="sn">'+s.serial_number+'</div><div class="dt">'+s.timestamp+' | K:'+s.existing_k+'</div></div><span class="hb '+(p?'p':'f')+'">'+st+'</span></div>'});el.innerHTML=h})}
+  h+='<div class="hi"><div><div class="sn">'+s.serial_number+'</div><div class="dt">'+s.timestamp+' | '+(s.meter_type||'')+' '+(s.meter_size?s.meter_size+'mm':'')+' | K:'+s.existing_k+'</div></div><span class="hb '+(p?'p':'f')+'">'+st+'</span></div>'});el.innerHTML=h})}
 
 // Modbus
 function chkMb(){fetch('/api/mb/status').then(function(r){return r.json()}).then(function(d){document.getElementById('mbPort').textContent=d.port||'None';document.getElementById('rsi').textContent=d.cfg.ref;document.getElementById('csi').textContent=d.cfg.cal})}
